@@ -15,7 +15,12 @@ export default function CandidateRegisterPage() {
     useEffect(() => {
         publicApi.get(`/test/${token}`)
             .then(res => {
-                setSessionData(res.data);
+                const payload = res?.data;
+                if (!payload || typeof payload !== 'object' || !payload.title) {
+                    setErrorMsg("Invalid test session data. Please contact your recruiter.");
+                    return;
+                }
+                setSessionData(payload);
             })
             .catch(err => {
                 const reason = err.response?.data?.reason;
@@ -73,6 +78,17 @@ export default function CandidateRegisterPage() {
                     </div>
                     <h2 className="text-2xl font-bold mb-2">Access Denied</h2>
                     <p className="text-gray-400">{errorMsg}</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (!sessionData) {
+        return (
+            <div className="min-h-screen bg-darkBg text-white flex items-center justify-center p-4">
+                <div className="bg-cardBg border border-red-900/50 p-8 rounded-xl max-w-md w-full text-center shadow-lg">
+                    <h2 className="text-2xl font-bold mb-2">Unable to Load Test</h2>
+                    <p className="text-gray-400">The test session data is unavailable right now. Please try again or contact your recruiter.</p>
                 </div>
             </div>
         );

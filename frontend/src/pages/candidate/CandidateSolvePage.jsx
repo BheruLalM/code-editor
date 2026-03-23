@@ -35,6 +35,11 @@ export default function CandidateSolvePage() {
         try {
             const res = await publicApi.get(`/test/attempt/${token}`);
             const d = res.data;
+            if (!d || typeof d !== 'object' || !d.problem) {
+                setErrorMsg("Invalid test attempt data. Please contact your recruiter.");
+                setLoading(false);
+                return;
+            }
             setData(d);
             
             if (d.already_submitted) {
@@ -152,6 +157,10 @@ export default function CandidateSolvePage() {
 
     if (errorMsg) {
         return <div className="min-h-screen bg-darkBg text-white flex items-center justify-center p-10">{errorMsg}</div>;
+    }
+
+    if (!data || !data.problem) {
+        return <div className="min-h-screen bg-darkBg text-white flex items-center justify-center p-10">Unable to load test details. Please refresh or contact your recruiter.</div>;
     }
 
     if (data.already_submitted) {
