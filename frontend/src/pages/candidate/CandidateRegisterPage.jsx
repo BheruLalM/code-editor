@@ -27,6 +27,8 @@ export default function CandidateRegisterPage() {
                 if (reason === 'expired') setErrorMsg("This test link has expired");
                 else if (reason === 'inactive') setErrorMsg("This test is no longer active");
                 else if (reason === 'full') setErrorMsg("This test session is full");
+                else if (err.code === 'ECONNABORTED') setErrorMsg("Server took too long to respond. Please try again.");
+                else if (!err.response) setErrorMsg("Unable to reach server. Please check network or API URL.");
                 else setErrorMsg("This link is invalid");
             })
             .finally(() => setLoading(false));
