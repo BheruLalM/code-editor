@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
 import AdminLoginPage from './pages/admin/AdminLoginPage';
@@ -12,10 +12,20 @@ import CandidateSolvePage from './pages/candidate/CandidateSolvePage';
 
 import ProtectedRoute from './components/ProtectedRoute';
 
+function UrlNormalizer({ children }) {
+  const location = useLocation();
+  const normalized = location.pathname.replace(/\/\/+/g, '/');
+  if (normalized !== location.pathname) {
+    return <Navigate to={normalized + location.search + location.hash} replace />;
+  }
+  return children;
+}
+
 function App() {
   return (
     <BrowserRouter>
       <Toaster position="top-right" />
+      <UrlNormalizer>
       <Routes>
         {/* PUBLIC ROUTES */}
         <Route path="/admin/login" element={<AdminLoginPage />} />
@@ -47,6 +57,7 @@ function App() {
         {/* DEFAULT REDIRECT */}
         <Route path="*" element={<Navigate to="/admin/login" replace />} />
       </Routes>
+      </UrlNormalizer>
     </BrowserRouter>
   );
 }
