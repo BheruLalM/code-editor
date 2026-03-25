@@ -20,6 +20,7 @@ export default function CandidateSolvePage() {
     
     const [executing, setExecuting] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [currentProblemIndex, setCurrentProblemIndex] = useState(0);
     
     // Console state
     const [runOutput, setRunOutput] = useState(null);
@@ -35,8 +36,8 @@ export default function CandidateSolvePage() {
         try {
             const res = await publicApi.get(`/test/attempt/${token}`);
             const d = res.data;
-            if (!d || typeof d !== 'object' || !d.problem) {
-                setErrorMsg("Invalid test attempt data. Please contact your recruiter.");
+            if (!d || typeof d !== 'object' || !d.problems || d.problems.length === 0) {
+                setErrorMsg("Invalid test attempt data or no problems assigned. Please contact your recruiter.");
                 setLoading(false);
                 return;
             }
@@ -47,10 +48,11 @@ export default function CandidateSolvePage() {
                 return;
             }
             
-            // Check for saved code
-            const savedCode = sessionStorage.getItem(`codearena_saved_${token}`);
-            const savedLang = sessionStorage.getItem(`codearena_lang_${token}`);
-            const starter = d.problem?.starter_code || {};
+            // Check for saved code for current problem
+            const currentProb = d.problems[currentProblemIndex];
+            const savedCode = sessionStorage.getItem(`codearena_saved_${token}_${currentProb.id}`);
+            const savedLang = sessionStorage.getItem(`codearena_lang_${token}_${currentProb.id}`);
+            const starter = currentProb.starter_code || {};
             const allowedLangs = Object.keys(starter);
             const langToUse = savedLang && starter[savedLang] ? savedLang : (starter.python ? 'python' : allowedLangs[0]);
 
@@ -60,9 +62,11 @@ export default function CandidateSolvePage() {
             
             if (savedCode) {
                 setCode(savedCode);
-            } else if (d.problem?.starter_code) {
+            } else if (currentProb.submitted_code) {
+                setCode(currentProb.submitted_code);
+            } else if (currentProb.starter_code) {
                 setCode(starter[langToUse]);
-                sessionStorage.setItem(`codearena_saved_${token}`, starter[langToUse]);
+                sessionStorage.setItem(`codearena_saved_${token}_${currentProb.id}`, starter[langToUse]);
             }
             
             setLoading(false);
@@ -74,9 +78,10 @@ export default function CandidateSolvePage() {
 
     const handleCodeChange = (newCode) => {
         setCode(newCode);
+        const currentProbId = data.problems[currentProblemIndex].id;
         if (saveTimeout.current) clearTimeout(saveTimeout.current);
         saveTimeout.current = setTimeout(() => {
-            sessionStorage.setItem(`codearena_saved_${token}`, newCode);
+            sessionStorage.setItem(`codearena_saved_${token}_${currentProbId}`, newCode);
         }, 10000); 
     };
 
@@ -98,10 +103,11 @@ export default function CandidateSolvePage() {
         }
         
         setLanguage(newLang);
-        sessionStorage.setItem(`codearena_lang_${token}`, newLang);
+        const currentProbId = data.problems[currentProblemIndex].id;
+        sessionStorage.setItem(`codearena_lang_${token}_${currentProbId}`, newLang);
 
         setCode(newStarter);
-        sessionStorage.setItem(`codearena_saved_${token}`, newStarter);
+        sessionStorage.setItem(`codearena_saved_${token}_${currentProbId}`, newStarter);
     };
 
     const handleRun = async () => {
@@ -109,7 +115,7 @@ export default function CandidateSolvePage() {
         setActiveTab('results');
         try {
             const res = await publicApi.post('/execute/run', {
-                problem_id: data.problem.id,
+                problem_id: data.problems[currentProblemIndex].id,
                 language: language,
                 code: code
             });
@@ -134,10 +140,12 @@ export default function CandidateSolvePage() {
         setSubmitting(true);
         try {
             await publicApi.post(`/test/attempt/${token}/submit`, {
+                problem_id: data.problems[currentProblemIndex].id,
                 language: language,
                 code: code
             });
             await loadAttempt();
+            setRunOutput(null);
         } catch (err) {
             const msg = err.response?.data?.detail || "Submission failed";
             toast.error(msg);
@@ -159,16 +167,20 @@ export default function CandidateSolvePage() {
         return <div className="min-h-screen bg-darkBg text-white flex items-center justify-center p-10">{errorMsg}</div>;
     }
 
-    if (!data || !data.problem) {
+    if (!data || !data.problems) {
         return <div className="min-h-screen bg-darkBg text-white flex items-center justify-center p-10">Unable to load test details. Please refresh or contact your recruiter.</div>;
     }
 
-    if (data.already_submitted) {
+    if (data.status === 'submitted') {
+        const totalPassed = data.problems.reduce((acc, p) => acc + (p.passed_cases || 0), 0);
+        const totalCases = data.problems.reduce((acc, p) => acc + (p.total_cases || 0), 0);
+
         return (
             <div className="fixed inset-0 bg-darkBg z-50 overflow-y-auto pt-10 pb-20 px-4">
-                <div className="max-w-[520px] mx-auto bg-cardBg border border-gray-800 rounded-xl p-8 shadow-2xl relative">
-                    <div className="text-center mb-6">
-                        <div className="text-gray-400 mb-2 font-medium">Test Completed</div>
+                <div className="max-w-2xl mx-auto bg-cardBg border border-gray-800 rounded-xl p-8 shadow-2xl relative">
+                    <div className="text-center mb-8">
+                        <div className="text-accent font-mono text-2xl font-bold mb-4">&lt; /&gt; CodeArena</div>
+                        <div className="text-gray-400 mb-2 font-medium">Assessment Completed</div>
                         
                         <div className={`w-36 h-36 mx-auto rounded-full border-8 flex flex-col items-center justify-center mb-4 transition-colors relative
                             ${data.score >= 75 ? 'border-green-500 text-green-500 shadow-[0_0_30px_rgba(34,197,94,0.2)]' : 
@@ -180,59 +192,68 @@ export default function CandidateSolvePage() {
                         </div>
                         
                         <div className="text-lg font-bold">
-                            {(data.test_results?.visible?.filter(r=>r.passed).length || 0) + (data.test_results?.hidden_passed || 0)}/
-                            {(data.test_results?.visible?.length || 0) + (data.test_results?.hidden_total || 0)} test cases passed
+                            Overall Score: {data.score?.toFixed(1) || 0}%
                         </div>
+                        <p className="text-gray-500 text-sm">{totalPassed} / {totalCases} total test cases passed</p>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3 mb-8">
-                        <div className="bg-[#111827] border border-gray-800 p-3 rounded text-center shrink-0 w-full flex flex-col">
-                            <div className="text-xs text-gray-500">Visible Passed</div>
-                            <div className="font-mono text-lg">{data.test_results?.visible?.filter(r=>r.passed).length || 0}/{data.test_results?.visible?.length || 0}</div>
-                        </div>
-                        <div className="bg-[#111827] border border-gray-800 p-3 rounded text-center shrink-0 w-full flex flex-col">
-                            <div className="text-xs text-gray-500">Hidden Passed</div>
-                            <div className="font-mono text-lg">{data.test_results?.hidden_passed || 0}/{data.test_results?.hidden_total || 0}</div>
-                        </div>
-                        
-                        <div className="bg-[#111827] border border-gray-800 p-3 rounded text-center shrink-0 w-full flex flex-col">
-                            <div className="text-xs text-gray-500">Language</div>
-                            <div className="font-mono text-lg capitalize">{data.submitted_code ? data.language : 'None'}</div>
-                        </div>
-                        
-                        <div className="bg-[#111827] border border-gray-800 p-3 rounded text-center shrink-0 w-full flex flex-col">
-                             <div className="text-xs text-gray-500">Status</div>
-                             <div className="font-mono text-lg capitalize text-green-400">Submitted</div>
-                        </div>
+                    <div className="space-y-4 mb-8">
+                        <h3 className="text-sm font-bold uppercase tracking-widest text-gray-500 mb-2">Problem Breakdown</h3>
+                        {data.problems.map((p, i) => (
+                            <div key={i} className="bg-darkBg border border-gray-800 p-4 rounded-lg flex items-center justify-between">
+                                <div>
+                                    <div className="font-bold">{p.title}</div>
+                                    <div className="text-xs text-gray-500 capitalize">{p.difficulty} • {p.language}</div>
+                                </div>
+                                <div className="text-right">
+                                    <div className={`font-mono font-bold ${p.score >= 70 ? 'text-green-400' : p.score >= 40 ? 'text-amber-400' : 'text-red-400'}`}>
+                                        {p.score?.toFixed(0) || 0}%
+                                    </div>
+                                    <div className="text-[10px] text-gray-600 uppercase font-bold">{p.status}</div>
+                                </div>
+                            </div>
+                        ))}
                     </div>
 
                     <div className="text-sm text-center text-gray-400 border-t border-gray-800 pt-6">
-                        Your solution has been submitted successfully.<br/>
-                        The recruiter will review your results.
+                        Thank you, {data.candidate_name}. Your assessment has been recorded.<br/>
+                        The recruitment team will be in touch with you shortly.
                     </div>
                 </div>
             </div>
         );
     }
 
-    const p = data.problem;
+    const p = data.problems[currentProblemIndex];
 
     return (
         <div className="h-screen bg-darkBg text-white flex flex-col overflow-hidden">
             {/* TOP BAR */}
             <header className="h-14 border-b border-gray-800 bg-[#172036] flex items-center justify-between px-6 shrink-0 z-10 w-full shadow-md">
-                <div className="flex items-center space-x-3 w-[30%]">
-                    <span className="font-bold text-lg truncate" title={p.title}>{p.title}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded capitalize font-semibold tracking-wide border min-w-fit
-                        ${p.difficulty === 'easy' ? 'bg-green-900/40 text-green-400 border-green-800' :
-                          p.difficulty === 'medium' ? 'bg-amber-900/40 text-amber-400 border-amber-800' :
-                          'bg-red-900/40 text-red-400 border-red-800'}`
-                    }>
-                        {p.difficulty}
-                    </span>
+                <div className="flex items-center space-x-4 w-[35%]">
+                    <div className="flex items-center space-x-2">
+                        <span className="text-accent font-mono font-bold text-xl">&lt;/&gt;</span>
+                        <span className="font-bold text-lg truncate">CodeArena</span>
+                    </div>
+                    <div className="h-6 w-[1px] bg-gray-700"></div>
+                    <div className="flex items-center space-x-2">
+                        <span className="text-gray-200 font-medium truncate max-w-[150px]">{p.title}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded capitalize font-bold tracking-wider border min-w-fit
+                            ${p.difficulty === 'easy' ? 'bg-green-900/40 text-green-400 border-green-800' :
+                              p.difficulty === 'medium' ? 'bg-amber-900/40 text-amber-400 border-amber-800' :
+                              'bg-red-900/40 text-red-400 border-red-800'}`
+                        }>
+                            {p.difficulty}
+                        </span>
+                    </div>
                 </div>
-                <div className="text-sm text-gray-500 text-center truncate flex-1 justify-center max-w-[40%]">{data.candidate_name}</div>
-                <div className="w-[30%] flex justify-end">
+                
+                <div className="flex flex-col items-center justify-center flex-1">
+                    <div className="text-xs text-gray-400 font-medium">{data.candidate_name}</div>
+                    <div className="text-[10px] text-gray-500 font-mono">Assigned Problems: {data.problems.length}</div>
+                </div>
+
+                <div className="w-[35%] flex justify-end items-center space-x-6">
                     <Timer 
                         totalSeconds={data.time_limit_minutes * 60} 
                         onExpire={doSubmit} 
@@ -243,6 +264,29 @@ export default function CandidateSolvePage() {
             {/* 3 PANEL LAYOUT */}
             <main className="flex-1 flex overflow-hidden">
                 
+                {/* NAVIGATION SIDEBAR */}
+                <aside className="w-16 border-r border-gray-800 bg-[#0F172A] flex flex-col items-center py-4 space-y-4 shrink-0">
+                    {data.problems.map((prob, idx) => (
+                        <button
+                            key={prob.id}
+                            onClick={() => {
+                                setCurrentProblemIndex(idx);
+                                setRunOutput(null);
+                            }}
+                            title={prob.title}
+                            className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all relative
+                                ${currentProblemIndex === idx 
+                                    ? 'bg-accent text-white shadow-lg shadow-blue-500/20' 
+                                    : 'text-gray-500 hover:bg-gray-800 hover:text-gray-300'}`}
+                        >
+                            <span className="font-bold">{idx + 1}</span>
+                            {prob.status === 'submitted' && (
+                                <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-[#0F172A]"></div>
+                            )}
+                        </button>
+                    ))}
+                </aside>
+
                 {/* LEFT PANEL */}
                 <section className="w-[32%] border-r border-gray-800 overflow-y-auto p-6 bg-[#0A0E17] custom-scrollbar pb-24 relative">
                     <h2 className="text-2xl font-bold mb-4">{p.title}</h2>

@@ -5,50 +5,112 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.admin import Admin
 from app.models.test_session import TestSession
-from app.models.candidate_attempt import CandidateAttempt
+from app.models.candidate_attempt import CandidateAttempt, AttemptStatus
+from app.models.candidate_problem import CandidateProblem, ProblemStatus
 from app.models.problem import Problem
 from app.dependencies.admin import get_current_admin
+from pydantic import BaseModel
 import secrets
 import random
 
 router = APIRouter(prefix="/admin/candidates", tags=["admin-candidates"])
 
+class AssignRequest(BaseModel):
+    problem_ids: list[str]
+    time_limit_minutes: int
+
 @router.get("/")
 async def get_candidates(
-    session_id: str,
+    session_id: str | None = None,
     db: AsyncSession = Depends(get_db), 
     current_admin: Admin = Depends(get_current_admin)
 ):
-    # Verify session belongs to current_admin
-    sess_res = await db.execute(select(TestSession).where(TestSession.id == session_id, TestSession.created_by == current_admin.id))
-    if not sess_res.scalar_one_or_none():
-        raise HTTPException(status_code=403, detail="Not authorized to access this session")
+    query = select(CandidateAttempt).options(selectinload(CandidateAttempt.problems).selectinload(CandidateProblem.problem))
+    
+    if session_id:
+        query = query.where(CandidateAttempt.session_id == session_id)
+    else:
+        # If no session_id, show all candidates assigned by or waiting for this admin? 
+        # For now, let's show all that are NOT in waiting status if they want general list
+        query = query.where(CandidateAttempt.status != AttemptStatus.waiting)
 
-    # Fetch attempts with problem details
-    result = await db.execute(
-        select(CandidateAttempt)
-        .options(selectinload(CandidateAttempt.problem))
-        .where(CandidateAttempt.session_id == session_id)
-        .order_by(desc(CandidateAttempt.submitted_at).nulls_last(), desc(CandidateAttempt.started_at).nulls_last())
-    )
+    result = await db.execute(query.order_by(desc(CandidateAttempt.created_at)))
     attempts = result.scalars().all()
     
     return [{
         "id": str(a.id),
         "candidate_name": a.candidate_name,
         "candidate_email": a.candidate_email,
-        "assigned_problem_id": a.assigned_problem_id,
-        "problem_title": a.problem.title if a.problem else None,
-        "problem_difficulty": a.problem.difficulty if a.problem else None,
         "status": a.status,
         "score": a.score,
-        "passed_cases": a.passed_cases,
-        "total_cases": a.total_cases,
-        "language": a.language,
-        "started_at": a.started_at,
-        "submitted_at": a.submitted_at,
-        "time_taken_seconds": a.time_taken_seconds
+        "time_taken_seconds": a.time_taken_seconds,
+        "created_at": a.created_at,
+        "problems_count": len(a.problems)
     } for a in attempts]
+
+@router.get("/waiting")
+async def get_waiting_candidates(
+    db: AsyncSession = Depends(get_db),
+    current_admin: Admin = Depends(get_current_admin)
+):
+    result = await db.execute(
+        select(CandidateAttempt)
+        .where(CandidateAttempt.status == AttemptStatus.waiting)
+        .order_by(desc(CandidateAttempt.created_at))
+    )
+    attempts = result.scalars().all()
+    return attempts
+
+@router.post("/{attempt_id}/assign")
+async def assign_test(
+    attempt_id: str,
+    data: AssignRequest,
+    db: AsyncSession = Depends(get_db),
+    current_admin: Admin = Depends(get_current_admin)
+):
+    result = await db.execute(select(CandidateAttempt).where(CandidateAttempt.id == attempt_id))
+    attempt = result.scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(404, "Candidate not found")
+    
+    if attempt.status != AttemptStatus.waiting:
+        raise HTTPException(400, "Candidate is already assigned or has started")
+
+    # Verify problems exist
+    prob_res = await db.execute(select(Problem).where(Problem.id.in_(data.problem_ids)))
+    found_probs = prob_res.scalars().all()
+    if len(found_probs) != len(data.problem_ids):
+        raise HTTPException(400, "One or more problem IDs are invalid")
+
+    attempt.status = AttemptStatus.registered
+    attempt.time_limit_minutes = data.time_limit_minutes
+    attempt.admin_id = current_admin.id
+
+    for p in found_probs:
+        cp = CandidateProblem(
+            attempt_id=attempt.id,
+            problem_id=p.id,
+            status=ProblemStatus.assigned
+        )
+        db.add(cp)
+    
+    await db.commit()
+    return {"message": "Test assigned successfully"}
+
+@router.delete("/{attempt_id}")
+async def delete_candidate(
+    attempt_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_admin: Admin = Depends(get_current_admin)
+):
+    result = await db.execute(select(CandidateAttempt).where(CandidateAttempt.id == attempt_id))
+    attempt = result.scalar_one_or_none()
+    if not attempt:
+        raise HTTPException(404, "Candidate not found")
+    
+    await db.delete(attempt)
+    await db.commit()
+    return {"message": "Candidate deleted successfully"}
 
 @router.get("/{attempt_id}")
 async def get_candidate_detail(
@@ -58,97 +120,47 @@ async def get_candidate_detail(
 ):
     result = await db.execute(
         select(CandidateAttempt)
-        .options(selectinload(CandidateAttempt.problem), selectinload(CandidateAttempt.session))
+        .options(
+            selectinload(CandidateAttempt.problems).selectinload(CandidateProblem.problem)
+        )
         .where(CandidateAttempt.id == attempt_id)
     )
     attempt = result.scalar_one_or_none()
     if not attempt:
         raise HTTPException(status_code=404, detail="Candidate attempt not found")
         
-    if attempt.session.created_by != current_admin.id:
+    # If it's a legacy attempt tied to a session, check authorization
+    if attempt.session_id:
+        # We need to load session separately if not loaded
+        from app.models.test_session import TestSession
+        session_res = await db.execute(select(TestSession).where(TestSession.id == attempt.session_id))
+        session = session_res.scalar_one_or_none()
+        if session and session.created_by != current_admin.id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+    elif attempt.admin_id and attempt.admin_id != current_admin.id:
         raise HTTPException(status_code=403, detail="Not authorized")
         
     return {
         "id": str(attempt.id),
         "candidate_name": attempt.candidate_name,
         "candidate_email": attempt.candidate_email,
-        "assigned_problem_id": attempt.assigned_problem_id,
         "status": attempt.status,
         "score": attempt.score,
-        "passed_cases": attempt.passed_cases,
-        "total_cases": attempt.total_cases,
-        "language": attempt.language,
         "started_at": attempt.started_at,
         "submitted_at": attempt.submitted_at,
         "time_taken_seconds": attempt.time_taken_seconds,
-        "submitted_code": attempt.submitted_code,
-        "test_results": attempt.test_results,
-        "problem": {
-            "id": attempt.problem.id,
-            "title": attempt.problem.title,
-            "difficulty": attempt.problem.difficulty,
-            "description": attempt.problem.description
-        } if attempt.problem else None
-    }
-
-@router.post("/{attempt_id}/assign-extra")
-async def assign_extra_problems(
-    attempt_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_admin: Admin = Depends(get_current_admin)
-):
-    result = await db.execute(
-        select(CandidateAttempt)
-        .options(selectinload(CandidateAttempt.session))
-        .where(CandidateAttempt.id == attempt_id)
-    )
-    attempt = result.scalar_one_or_none()
-    if not attempt:
-        raise HTTPException(status_code=404, detail="Candidate attempt not found")
-        
-    if attempt.session.created_by != current_admin.id:
-        raise HTTPException(status_code=403, detail="Not authorized")
-        
-    session = attempt.session
-    
-    attempts_res = await db.execute(
-        select(CandidateAttempt.assigned_problem_id)
-        .where(
-            CandidateAttempt.session_id == session.id,
-            CandidateAttempt.candidate_email == attempt.candidate_email
-        )
-    )
-    used_ids = set(attempts_res.scalars().all())
-    
-    prob_query = select(Problem)
-    if session.difficulty_filter != "any":
-        prob_query = prob_query.where(Problem.difficulty == session.difficulty_filter)
-    probs_res = await db.execute(prob_query)
-    all_probs = probs_res.scalars().all()
-    
-    unused = [p for p in all_probs if p.id not in used_ids]
-    
-    if len(unused) < 2:
-        raise HTTPException(status_code=400, detail=f"Not enough unused problems available (found {len(unused)}, need 2). Seed more problems to assign.")
-        
-    assigned_problems = random.sample(unused, 2)
-    
-    new_tokens = []
-    for p in assigned_problems:
-        candidate_token = secrets.token_hex(16)
-        new_attempt = CandidateAttempt(
-            session_id=session.id,
-            candidate_token=candidate_token,
-            candidate_name=attempt.candidate_name,
-            candidate_email=attempt.candidate_email,
-            assigned_problem_id=p.id
-        )
-        db.add(new_attempt)
-        new_tokens.append(candidate_token)
-        
-    await db.commit()
-    
-    return {
-        "message": "Successfully assigned 2 extra problems",
-        "new_links": new_tokens
+        "problems": [
+            {
+                "problem_id": cp.problem_id,
+                "title": cp.problem.title,
+                "difficulty": cp.problem.difficulty,
+                "status": cp.status,
+                "language": cp.language,
+                "score": cp.score,
+                "passed_cases": cp.passed_cases,
+                "total_cases": cp.total_cases,
+                "submitted_code": cp.submitted_code,
+                "test_results": cp.test_results
+            } for cp in attempt.problems
+        ]
     }

@@ -3,6 +3,7 @@ from app.models.admin import Admin
 from app.models.problem import Problem, DifficultyLevel
 from app.models.test_session import TestSession, DifficultyFilter
 from app.models.candidate_attempt import CandidateAttempt, AttemptStatus
+from app.models.candidate_problem import CandidateProblem, ProblemStatus
 
 __all__ = [
   "Base", "TimestampMixin",
@@ -10,4 +11,5 @@ __all__ = [
   "Problem", "DifficultyLevel",
   "TestSession", "DifficultyFilter",
   "CandidateAttempt", "AttemptStatus",
+  "CandidateProblem", "ProblemStatus",
 ]

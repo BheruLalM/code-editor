@@ -9,6 +9,8 @@ import CandidateResultPage from './pages/admin/CandidateResultPage';
 
 import CandidateRegisterPage from './pages/candidate/CandidateRegisterPage';
 import CandidateSolvePage from './pages/candidate/CandidateSolvePage';
+import ApplyPage from './pages/candidate/ApplyPage';
+import WaitingRoomPage from './pages/candidate/WaitingRoomPage';
 
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -29,6 +31,8 @@ function App() {
       <Routes>
         {/* PUBLIC ROUTES */}
         <Route path="/admin/login" element={<AdminLoginPage />} />
+        <Route path="/apply" element={<ApplyPage />} />
+        <Route path="/waiting/:token" element={<WaitingRoomPage />} />
         <Route path="/test/:token" element={<CandidateRegisterPage />} />
         <Route path="/solve/:token" element={<CandidateSolvePage />} />
 
