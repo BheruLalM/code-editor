@@ -9,7 +9,7 @@ from alembic import context
 
 from app.models.base import Base
 # Make sure all models are imported so they register metadata
-from app.models import Admin, Problem, TestSession, CandidateAttempt
+from app.models import Admin, Problem, TestSession, CandidateAttempt, CandidateProblem, AttemptStatus
 import os
 from dotenv import load_dotenv
 
