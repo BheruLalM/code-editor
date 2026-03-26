@@ -8,7 +8,6 @@ import { useAdminStore } from '../../store/adminStore';
 
 export default function AdminDashboard() {
     const admin = useAdminStore(state => state.admin);
-    const logout = useAdminStore(state => state.logout);
     const navigate = useNavigate();
     
     const [health, setHealth] = useState(null);
@@ -88,10 +87,6 @@ export default function AdminDashboard() {
         }
     };
 
-    const handleLogout = () => {
-        logout();
-        navigate('/admin/login');
-    };
 
     const toggleActive = async (id, currentStatus) => {
         try {
@@ -177,9 +172,7 @@ export default function AdminDashboard() {
                         <span>Registration Link</span>
                     </button>
                     {getDockerPill()}
-                    <div className="h-6 w-[1px] bg-gray-800"></div>
                     <span className="text-gray-300">{admin?.full_name}</span>
-                    <button onClick={handleLogout} className="text-sm text-gray-400 hover:text-white transition">Logout</button>
                 </div>
             </nav>
 

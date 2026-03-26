@@ -6,17 +6,15 @@ from app.database import get_db
 from app.models.admin import Admin
 from app.services.auth_service import decode_admin_token
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/admin/auth/login")
+from sqlalchemy import select
 
 async def get_current_admin(
-  token: str = Depends(oauth2_scheme),
   db: AsyncSession = Depends(get_db)
 ) -> Admin:
-  payload = decode_admin_token(token)
+  # Simply fetch the first admin (the seeded default one)
+  result = await db.execute(select(Admin))
+  admin = result.scalars().first()
   
-  # For async SQLAlchemy:
-  admin = await db.get(Admin, UUID(payload["sub"]))
-  
-  if not admin or not admin.is_active:
-    raise HTTPException(status_code=401, detail="Invalid admin credentials")
+  if not admin:
+    raise HTTPException(status_code=500, detail="Default admin not seeded")
   return admin

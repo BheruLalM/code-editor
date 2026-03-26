@@ -1,7 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 
-import AdminLoginPage from './pages/admin/AdminLoginPage';
 import AdminDashboard from './pages/admin/AdminDashboard';
 import CreateSessionPage from './pages/admin/CreateSessionPage';
 import SessionDetailPage from './pages/admin/SessionDetailPage';
@@ -11,8 +10,6 @@ import CandidateRegisterPage from './pages/candidate/CandidateRegisterPage';
 import CandidateSolvePage from './pages/candidate/CandidateSolvePage';
 import ApplyPage from './pages/candidate/ApplyPage';
 import WaitingRoomPage from './pages/candidate/WaitingRoomPage';
-
-import ProtectedRoute from './components/ProtectedRoute';
 
 function UrlNormalizer({ children }) {
   const location = useLocation();
@@ -30,36 +27,19 @@ function App() {
       <UrlNormalizer>
       <Routes>
         {/* PUBLIC ROUTES */}
-        <Route path="/admin/login" element={<AdminLoginPage />} />
         <Route path="/apply" element={<ApplyPage />} />
         <Route path="/waiting/:token" element={<WaitingRoomPage />} />
         <Route path="/test/:token" element={<CandidateRegisterPage />} />
         <Route path="/solve/:token" element={<CandidateSolvePage />} />
 
-        {/* PROTECTED ADMIN ROUTES */}
-        <Route path="/admin" element={
-          <ProtectedRoute>
-            <AdminDashboard />
-          </ProtectedRoute>
-        } />
-        <Route path="/admin/sessions/new" element={
-          <ProtectedRoute>
-            <CreateSessionPage />
-          </ProtectedRoute>
-        } />
-        <Route path="/admin/sessions/:id" element={
-          <ProtectedRoute>
-            <SessionDetailPage />
-          </ProtectedRoute>
-        } />
-        <Route path="/admin/candidates/:id" element={
-          <ProtectedRoute>
-            <CandidateResultPage />
-          </ProtectedRoute>
-        } />
+        {/* ADMIN ROUTES (NOW PUBLIC) */}
+        <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin/sessions/new" element={<CreateSessionPage />} />
+        <Route path="/admin/sessions/:id" element={<SessionDetailPage />} />
+        <Route path="/admin/candidates/:id" element={<CandidateResultPage />} />
 
         {/* DEFAULT REDIRECT */}
-        <Route path="*" element={<Navigate to="/admin/login" replace />} />
+        <Route path="*" element={<Navigate to="/admin" replace />} />
       </Routes>
       </UrlNormalizer>
     </BrowserRouter>

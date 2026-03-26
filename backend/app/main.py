@@ -9,22 +9,24 @@ from app.models import Base, Admin, Problem, TestSession, CandidateAttempt
 from app.database import AsyncSessionLocal, get_db
 from app.config import settings
 
-from app.routers.admin_auth import router as admin_auth_router
 from app.routers.admin_sessions import router as admin_sessions_router
 from app.routers.admin_candidates import router as admin_candidates_router
 from app.routers.problems import router as problems_router
 from app.routers.execute import router as execute_router
 from app.routers.test_link import router as test_link_router
 
+from app.data.seed_admin import seed_default_admin
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     print("CodeArena starting up...")
 
-    # Seed problems
+    # Seed problems and default admin
     async with AsyncSessionLocal() as db:
         from app.data.problems import seed_problems
         await seed_problems(db)
+        await seed_default_admin(db)
 
     # Check Judge0 availability (best-effort)
     from app.services.executor import check_executor_health
@@ -51,7 +53,6 @@ app.add_middleware(
 )
 
 # Include ALL routers
-app.include_router(admin_auth_router)
 app.include_router(admin_sessions_router)
 app.include_router(admin_candidates_router)
 app.include_router(problems_router)
